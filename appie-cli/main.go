@@ -356,6 +356,339 @@ func main() {
 		}
 		printJSON(recipe)
 
+	case "list-price":
+		// Show all items in the v2 shopping list with prices and total
+		client := mustAuth(ctx, configPath)
+		req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.ah.nl/mobile-services/shoppinglist/v2/items", nil)
+		req.Header.Set("Authorization", "Bearer "+client.AccessToken())
+		req.Header.Set("x-client-name", "appie-ios")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fatal("%v", err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var raw struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		json.Unmarshal(data, &raw)
+
+		type priceItem struct {
+			Title    string  `json:"title"`
+			Qty      int     `json:"qty"`
+			UnitPrice float64 `json:"unitPrice"`
+			Total    float64 `json:"total"`
+			IsBonus  bool    `json:"isBonus"`
+		}
+		var items []priceItem
+		var totalNormal, totalDiscount float64
+
+		for _, item := range raw.Items {
+			var m map[string]json.RawMessage
+			json.Unmarshal(item, &m)
+			// Skip strikedthrough items (removed via remove-from-list)
+			var striked bool
+			json.Unmarshal(m["strikedthrough"], &striked)
+			if striked {
+				continue
+			}
+			var pd map[string]json.RawMessage
+			json.Unmarshal(m["productDetails"], &pd)
+			var prod map[string]interface{}
+			json.Unmarshal(pd["product"], &prod)
+			qty := 1
+			json.Unmarshal(m["quantity"], &qty)
+
+			title, _ := prod["title"].(string)
+			priceBefore, _ := prod["priceBeforeBonus"].(float64)
+			currentPriceRaw := prod["currentPrice"]
+			isBonus, _ := prod["isBonus"].(bool)
+
+			unitPrice := priceBefore
+			if currentPriceRaw != nil {
+				if cp, ok := currentPriceRaw.(float64); ok {
+					unitPrice = cp
+				}
+			}
+
+			total := unitPrice * float64(qty)
+			totalNormal += priceBefore * float64(qty)
+			totalDiscount += total
+
+			items = append(items, priceItem{
+				Title:    title,
+				Qty:      qty,
+				UnitPrice: unitPrice,
+				Total:    total,
+				IsBonus:  isBonus,
+			})
+		}
+
+		// Print list
+		for _, it := range items {
+			bonus := ""
+			if it.IsBonus {
+				bonus = " 🏷"
+			}
+			fmt.Printf("%-45s x%-2d  EU%.2f%s\n", it.Title, it.Qty, it.Total, bonus)
+		}
+		fmt.Printf("\n%d items\n", len(items))
+		if totalNormal != totalDiscount {
+			fmt.Printf("Normaal:  EU%.2f\n", totalNormal)
+			fmt.Printf("Korting:  -EU%.2f\n", totalNormal-totalDiscount)
+		}
+		fmt.Printf("Totaal:   EU%.2f\n", totalDiscount)
+
+	case "delivery-slots":
+		// Show available delivery time slots
+		client := mustAuth(ctx, configPath)
+		endpoints := []string{
+			"/mobile-services/order/v1/deliverytimeslots?addressId=",
+			"/mobile-services/v2/deliverytimeslots",
+			"/mobile-services/order/v1/fulfillments",
+		}
+		token := client.AccessToken()
+		for _, ep := range endpoints {
+			r, err := http.NewRequestWithContext(ctx, "GET", "https://api.ah.nl"+ep, nil)
+			if err != nil {
+				continue
+			}
+			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set("x-client-name", "appie-ios")
+			rr, err := http.DefaultClient.Do(r)
+			if err != nil {
+				continue
+			}
+			b, _ := io.ReadAll(rr.Body)
+			rr.Body.Close()
+			if rr.StatusCode == 200 && len(b) > 10 {
+				fmt.Printf("Endpoint: %s\n", ep)
+				// Pretty print first 2000 chars
+				var pretty interface{}
+				if json.Unmarshal(b, &pretty) == nil {
+					out, _ := json.MarshalIndent(pretty, "", "  ")
+					if len(out) > 2000 {
+						out = out[:2000]
+					}
+					fmt.Println(string(out))
+				}
+				os.Exit(0)
+			}
+		}
+		fmt.Println("Geen bezorgslots gevonden via bekende endpoints.")
+		fmt.Println("Tip: bezorging plannen kan het beste via de AH app of ah.nl/bestellen")
+
+	case "place-order":
+		// Transfer shopping list items to active order, then show link to complete payment
+		client := mustAuth(ctx, configPath)
+
+		// Get current shopping list items
+		req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.ah.nl/mobile-services/shoppinglist/v2/items", nil)
+		req.Header.Set("Authorization", "Bearer "+client.AccessToken())
+		req.Header.Set("x-client-name", "appie-ios")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fatal("Could not fetch shopping list: %v", err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var slRaw struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		json.Unmarshal(data, &slRaw)
+
+		// Parse items
+		var orderItems []appie.OrderItem
+		for _, item := range slRaw.Items {
+			var m map[string]json.RawMessage
+			json.Unmarshal(item, &m)
+			var pd map[string]json.RawMessage
+			json.Unmarshal(m["productDetails"], &pd)
+			var prod map[string]interface{}
+			json.Unmarshal(pd["product"], &prod)
+			qty := 1
+			json.Unmarshal(m["quantity"], &qty)
+			idFloat, _ := prod["webshopId"].(float64)
+			if int(idFloat) > 0 && qty > 0 {
+				orderItems = append(orderItems, appie.OrderItem{
+					ProductID: int(idFloat),
+					Quantity:  qty,
+				})
+			}
+		}
+
+		// Calculate total from shopping list
+		slReq2, _ := http.NewRequestWithContext(ctx, "GET", "https://api.ah.nl/mobile-services/shoppinglist/v2/items", nil)
+		slReq2.Header.Set("Authorization", "Bearer "+client.AccessToken())
+		slReq2.Header.Set("x-client-name", "appie-ios")
+		slResp2, _ := http.DefaultClient.Do(slReq2)
+		slData2, _ := io.ReadAll(slResp2.Body)
+		slResp2.Body.Close()
+		var slRaw2 struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		json.Unmarshal(slData2, &slRaw2)
+		var total float64
+		for _, item := range slRaw2.Items {
+			var m map[string]json.RawMessage
+			json.Unmarshal(item, &m)
+			var pd map[string]json.RawMessage
+			json.Unmarshal(m["productDetails"], &pd)
+			var prod map[string]interface{}
+			json.Unmarshal(pd["product"], &prod)
+			qty := 1
+			json.Unmarshal(m["quantity"], &qty)
+			price, _ := prod["priceBeforeBonus"].(float64)
+			if cp, ok := prod["currentPrice"].(float64); ok {
+				price = cp
+			}
+			total += price * float64(qty)
+		}
+
+		printJSON(map[string]any{
+			"ok":        true,
+			"items":     len(orderItems),
+			"totalEUR":  fmt.Sprintf("%.2f", total),
+			"action":    "Open AH app → Mijn Lijst → Bestellen, of ga naar https://www.ah.nl/bestellen",
+			"note":      "Bezorging selecteren en betalen vereist de AH app (geen publieke payment API)",
+		})
+
+	case "list-shoppinglist":
+		client := mustAuth(ctx, configPath)
+		req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.ah.nl/mobile-services/shoppinglist/v2/items", nil)
+		req.Header.Set("Authorization", "Bearer "+client.AccessToken())
+		req.Header.Set("x-client-name", "appie-ios")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fatal("%v", err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		// Parse and print each item
+		var raw struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		json.Unmarshal(data, &raw)
+		for _, item := range raw.Items {
+			var m map[string]json.RawMessage
+			json.Unmarshal(item, &m)
+			// Skip strikedthrough items (removed via remove-from-list)
+			var striked bool
+			json.Unmarshal(m["strikedthrough"], &striked)
+			if striked {
+				continue
+			}
+			var pd map[string]json.RawMessage
+			json.Unmarshal(m["productDetails"], &pd)
+			var prod map[string]interface{}
+			json.Unmarshal(pd["product"], &prod)
+			qty := 0
+			json.Unmarshal(m["quantity"], &qty)
+			fmt.Printf("%v x%d (id: %.0f)\n", prod["title"], qty, prod["webshopId"])
+		}
+
+	case "remove-from-list":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: appie-cli remove-from-list <product-id>")
+			fmt.Fprintln(os.Stderr, "       appie-cli remove-from-list --search <name>")
+			os.Exit(1)
+		}
+		client := mustAuth(ctx, configPath)
+
+		// Fetch items from the v2 shoppinglist (where batch-add stores items)
+		v2Req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.ah.nl/mobile-services/shoppinglist/v2/items", nil)
+		v2Req.Header.Set("Authorization", "Bearer "+client.AccessToken())
+		v2Req.Header.Set("x-client-name", "appie-ios")
+		v2Resp, err := http.DefaultClient.Do(v2Req)
+		if err != nil {
+			fatal("Could not fetch shopping list: %v", err)
+		}
+		v2Data, _ := io.ReadAll(v2Resp.Body)
+		v2Resp.Body.Close()
+
+		// Parse items using raw JSON
+		var v2RawWrapper struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err := json.Unmarshal(v2Data, &v2RawWrapper); err != nil {
+			fatal("Could not parse shoppinglist: %v", err)
+		}
+		type parsedItem struct {
+			title     string
+			webshopID int
+		}
+		var parsedItems []parsedItem
+		for _, raw := range v2RawWrapper.Items {
+			var m map[string]json.RawMessage
+			json.Unmarshal(raw, &m)
+			var pd map[string]json.RawMessage
+			json.Unmarshal(m["productDetails"], &pd)
+			var prod map[string]interface{}
+			json.Unmarshal(pd["product"], &prod)
+			title, _ := prod["title"].(string)
+			idFloat, _ := prod["webshopId"].(float64)
+			parsedItems = append(parsedItems, parsedItem{title: title, webshopID: int(idFloat)})
+		}
+
+		// Find product IDs to remove
+		toRemoveProductIDs := []int{}
+		if os.Args[2] == "--search" {
+			if len(os.Args) < 4 {
+				fatal("Missing search query")
+			}
+			searchTerm := strings.ToLower(strings.Join(os.Args[3:], " "))
+			for _, item := range parsedItems {
+				if strings.Contains(strings.ToLower(item.title), searchTerm) {
+					toRemoveProductIDs = append(toRemoveProductIDs, item.webshopID)
+					fmt.Fprintf(os.Stderr, "Removing: %s (id %d)\n", item.title, item.webshopID)
+				}
+			}
+		} else {
+			productID, err := strconv.Atoi(os.Args[2])
+			if err != nil {
+				fatal("Invalid product ID: %s (use --search <name> to search by name)", os.Args[2])
+			}
+			toRemoveProductIDs = append(toRemoveProductIDs, productID)
+		}
+
+		if len(toRemoveProductIDs) == 0 {
+			fatal("No matching items found in shopping list (%d items total)", len(parsedItems))
+		}
+
+		// Remove from v2 by setting strikeThrough=true (AH API doesn't support actual delete)
+		// StrikeThrough marks items as "picked/done" - they appear crossed out in the app
+		type patchItem struct {
+			ProductID     int    `json:"productId"`
+			Quantity      int    `json:"quantity"`
+			Type          string `json:"type"`
+			OriginCode    string `json:"originCode"`
+			Description   string `json:"description"`
+			StrikeThrough bool   `json:"strikeThrough"`
+		}
+		patchItems := make([]patchItem, len(toRemoveProductIDs))
+		for i, pid := range toRemoveProductIDs {
+			patchItems[i] = patchItem{ProductID: pid, Quantity: 1, Type: "SHOPPABLE", OriginCode: "PRD", Description: "", StrikeThrough: true}
+		}
+		delBodyBytes, _ := json.Marshal(map[string]any{"items": patchItems})
+		delReq, _ := http.NewRequestWithContext(ctx, "PATCH", "https://api.ah.nl/mobile-services/shoppinglist/v2/items", bytes.NewReader(delBodyBytes))
+		delReq.Header.Set("Authorization", "Bearer "+client.AccessToken())
+		delReq.Header.Set("Content-Type", "application/json")
+		delReq.Header.Set("x-client-name", "appie-ios")
+		delResp, err := http.DefaultClient.Do(delReq)
+		if err != nil {
+			fatal("Remove request failed: %v", err)
+		}
+		delData, _ := io.ReadAll(delResp.Body)
+		delResp.Body.Close()
+
+		if delResp.StatusCode != 200 && delResp.StatusCode != 204 {
+			fatal("Remove failed (%d): %s", delResp.StatusCode, string(delData))
+		}
+
+		printJSON(map[string]any{"ok": true, "removed": len(toRemoveProductIDs)})
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -379,6 +712,11 @@ func printUsage() {
 		"add-to-list <id> [qty] Add product to shopping list",
 		"add-to-list --text \"item\" [qty]  Add free text item",
 		"batch-add              Add multiple items from stdin (JSON array)",
+		"remove-from-list <id>  Remove item by product ID",
+		"remove-from-list --search <name>  Remove items matching name",
+		"list-price             Show all items with prices and total",
+		"delivery-slots         Show available delivery time slots",
+		"place-order            Transfer shopping list to order (complete in app)",
 		"clear-list             Clear shopping list",
 		"order                  Show current order",
 		"add-to-order <id> [qty] Add product to order",
