@@ -1,5 +1,6 @@
 # Auth tokens - NEVER commit these
 .appie.json
+tokens.json
 
 # User-specific files
 config.json
@@ -8,11 +9,15 @@ taste-profile.md
 meal-history.json
 product-cache.json
 
-# Build artifacts
-appie-cli/appie-cli
+# Build artifacts. Anchored to the repo root so they do not match cmd/appie-cli.
+/bin/
+/appie-cli
+/appie-mcp
+*.exe
 
 # Analysis output
 analyse-snellere-flow.md
 
 # OS
 .DS_Store
+Thumbs.db
