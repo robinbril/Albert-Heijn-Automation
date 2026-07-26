@@ -24,6 +24,21 @@ func TestGraphQLOperation(t *testing.T) {
 		{"field named mutation", `{"query":"query Q { mutationLog { id } }"}`, "query"},
 		{"unparseable fails closed", `not json`, "mutation"},
 		{"empty fails closed", ``, "mutation"},
+
+		// A document may open with something other than its operation. Reading
+		// only the first keyword let a mutation through behind a fragment.
+		{"fragment then mutation", "{\"query\":\"fragment F on Product { id }\\nmutation Evil { cartAdd { id } }\"}", "mutation"},
+		{"fragment then query", "{\"query\":\"fragment F on Product { id }\\nquery Q { member { ...F } }\"}", "query"},
+		{"query then mutation", "{\"query\":\"query Q { member { id } }\\nmutation Evil { cartAdd { id } }\"}", "mutation"},
+		{"blank query fails closed", `{"query":"   "}`, "mutation"},
+		{"missing query field fails closed", `{"variables":{}}`, "mutation"},
+		{"unknown top-level construct fails closed", `{"query":"directive @x on FIELD"}`, "mutation"},
+		{"unbalanced braces fail closed", `{"query":"query Q { member { id }"}`, "mutation"},
+
+		// Multi-line documents must still classify on the operation line only.
+		{"multiline query", "{\"query\":\"query Q {\\n  member {\\n    id\\n  }\\n}\"}", "query"},
+		{"multiline shorthand", "{\"query\":\"{\\n  member {\\n    id\\n  }\\n}\"}", ""},
+		{"multiline mutation", "{\"query\":\"mutation M {\\n  cartAdd {\\n    id\\n  }\\n}\"}", "mutation"},
 	}
 
 	for _, tc := range tests {

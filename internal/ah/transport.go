@@ -42,16 +42,16 @@ func newTransport(base http.RoundTripper, readOnly bool) http.RoundTripper {
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	body, err := peekBody(req)
+	body, classifiable, err := peekBody(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if t.readOnly && isMutating(req, body) {
+	if t.readOnly && (!classifiable || isMutating(req, body)) {
 		return nil, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, ErrReadOnly)
 	}
 
-	if !isRetryable(req, body) {
+	if !classifiable || !isRetryable(req, body) {
 		return t.base.RoundTrip(req)
 	}
 	return t.roundTripWithRetries(req)
@@ -103,24 +103,40 @@ func (t *transport) roundTripWithRetries(req *http.Request) (*http.Response, err
 	}
 }
 
-// peekBody returns the request body and leaves the request able to send it.
-func peekBody(req *http.Request) ([]byte, error) {
+// peekBody returns the request body for classification and leaves the request
+// able to send it.
+//
+// Bodies larger than maxSniffSize are sent whole but reported as unreadable, so
+// the caller classifies them as a write. Truncating what gets sent would corrupt
+// a large batch silently, which is worse than refusing it in read-only mode.
+func peekBody(req *http.Request) ([]byte, bool, error) {
 	if req.Body == nil || req.Body == http.NoBody {
-		return nil, nil
+		return nil, true, nil
 	}
 
-	data, err := io.ReadAll(io.LimitReader(req.Body, maxSniffSize))
-	req.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(req.Body, maxSniffSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("read request body: %w", err)
+		req.Body.Close()
+		return nil, false, fmt.Errorf("read request body: %w", err)
 	}
 
+	if len(data) > maxSniffSize {
+		rest := req.Body
+		req.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(data), rest), rest}
+		req.GetBody = nil
+		return nil, false, nil
+	}
+
+	req.Body.Close()
 	req.Body = io.NopCloser(bytes.NewReader(data))
 	req.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 	req.ContentLength = int64(len(data))
-	return data, nil
+	return data, true, nil
 }
 
 // replayRequest clones a request with a fresh body for a retry attempt.
@@ -174,9 +190,14 @@ func isGraphQLPath(path string) bool {
 	return strings.TrimSuffix(path, "/") == "/graphql"
 }
 
-// graphQLOperation returns the leading operation keyword of a GraphQL request
-// body: "query", "mutation", "subscription", or "" for an anonymous operation.
-// An unparseable body yields "mutation" so the read-only guard fails closed.
+// graphQLOperation classifies a GraphQL request body as "query", "mutation",
+// "subscription", or "" for anonymous shorthand.
+//
+// It reads every top-level keyword rather than only the first, because a
+// document may legally open with a fragment definition and still carry a
+// mutation further down, and because a document may hold several operations.
+// Anything it cannot account for is reported as a mutation, so both the
+// read-only guard and the no-retry rule fail closed.
 func graphQLOperation(body []byte) string {
 	if len(body) == 0 {
 		return "mutation"
@@ -188,29 +209,67 @@ func graphQLOperation(body []byte) string {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "mutation"
 	}
+	if strings.TrimSpace(payload.Query) == "" {
+		return "mutation"
+	}
 
+	// Only lines outside a selection set define operations, so brace depth
+	// decides which lines are classified. One mutation anywhere makes the whole
+	// request a write, whatever precedes it.
+	found := ""
+	depth := 0
 	for _, line := range strings.Split(payload.Query, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		word := strings.TrimFunc(line, func(r rune) bool { return !unicode.IsLetter(r) })
-		if idx := strings.IndexFunc(word, func(r rune) bool { return !unicode.IsLetter(r) }); idx > 0 {
-			word = word[:idx]
-		}
-		switch strings.ToLower(word) {
-		case "mutation":
-			return "mutation"
-		case "subscription":
-			return "subscription"
-		case "query":
-			return "query"
-		default:
+
+		switch {
+		case depth > 0:
+			// Inside an operation. Nothing here redefines it, but a stray
+			// mutation keyword means the brace counting has lost track.
+			if leadingKeyword(line) == "mutation" {
+				return "mutation"
+			}
+		case strings.HasPrefix(line, "{"):
 			// Anonymous shorthand such as "{ member { id } }" is always a query.
-			return ""
+		default:
+			switch leadingKeyword(line) {
+			case "mutation":
+				return "mutation"
+			case "subscription":
+				if found != "query" {
+					found = "subscription"
+				}
+			case "query":
+				found = "query"
+			case "fragment":
+				// A fragment definition says nothing about the operation.
+			default:
+				// An unrecognised top-level construct. Do not guess.
+				return "mutation"
+			}
 		}
+
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
 	}
-	return ""
+
+	// Braces that never balance mean the document was not what it looked like,
+	// for instance because one was hiding in a string literal.
+	if depth != 0 {
+		return "mutation"
+	}
+	return found
+}
+
+// leadingKeyword returns the first run of letters on a line, lowercased, or ""
+// when the line does not start with a word.
+func leadingKeyword(line string) string {
+	word := strings.TrimLeftFunc(line, func(r rune) bool { return !unicode.IsLetter(r) })
+	if idx := strings.IndexFunc(word, func(r rune) bool { return !unicode.IsLetter(r) }); idx >= 0 {
+		word = word[:idx]
+	}
+	return strings.ToLower(word)
 }
 
 func isTransientStatus(code int) bool {
