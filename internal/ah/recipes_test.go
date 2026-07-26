@@ -148,3 +148,24 @@ func TestNormalizeIngredientDutchPlurals(t *testing.T) {
 		}
 	}
 }
+
+func TestRecipeTimeSeparatesWorkFromWaiting(t *testing.T) {
+	// A dish needing 20 minutes of work and 15 in the oven is a 20-minute job;
+	// counting the oven towards hands-on time hid it from a 30-minute search.
+	timing := newRecipeTime(20, 15, 0)
+
+	if timing.HandsOn != 20 {
+		t.Errorf("handsOn = %d, want 20: oven time is unattended", timing.HandsOn)
+	}
+	if timing.Total != 35 {
+		t.Errorf("total = %d, want 35", timing.Total)
+	}
+
+	resting := newRecipeTime(20, 0, 30)
+	if resting.HandsOn != 20 {
+		t.Errorf("handsOn = %d, want 20: waiting is unattended", resting.HandsOn)
+	}
+	if resting.Total != 50 {
+		t.Errorf("total = %d, want 50", resting.Total)
+	}
+}

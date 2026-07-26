@@ -56,9 +56,9 @@ category mix and which products are staples rather than one-offs.
 **Deals** — `bonus` is the whole bonus folder, `bonus-matches` narrows it to promotions on things
 you already buy, and `bargains` finds the marked-down, about-to-expire items in a specific store.
 
-**Recipes** — `recipes` searches Allerhande with a cap on active cooking time, `recipe` reads one in
-full, and `plan` merges several into a single deduplicated ingredient list so shared onions are
-bought once.
+**Recipes** — `recipes` searches Allerhande with a cap on hands-on time, counting neither oven nor
+waiting time since you are not standing there for those. `recipe` reads one in full, and `plan`
+merges several into a single deduplicated ingredient list so shared onions are bought once.
 
 **Shopping list and cart** — read with prices and totals, add products or free-text notes, change
 quantities, cross items off, delete lines, and copy the list into the cart.

@@ -50,7 +50,7 @@ type recipeSearchInput struct {
 	Query          string `json:"query,omitempty" jsonschema:"Search term in Dutch. Empty returns popular recipes."`
 	Limit          int    `json:"limit,omitempty" jsonschema:"Maximum number of recipes. Defaults to 10."`
 	Start          int    `json:"start,omitempty" jsonschema:"Offset into the results, for paging."`
-	MaxCookMinutes int    `json:"max_cook_minutes,omitempty" jsonschema:"Drop recipes whose active cooking time exceeds this."`
+	MaxCookMinutes int    `json:"max_cook_minutes,omitempty" jsonschema:"Drop recipes needing more hands-on time than this, in minutes. Oven and waiting time are unattended and do not count towards it."`
 }
 
 type recipeInput struct {
@@ -264,7 +264,7 @@ func registerCatalogTools(s *mcp.Server) {
 
 func registerRecipeTools(s *mcp.Server) {
 	addRead(s, "search_recipes",
-		"Search Allerhande recipes. Times are split into active cooking time and waiting time.",
+		"Search Allerhande recipes. Times are split into hands-on work and unattended oven and waiting time; totalMinutes is when you eat.",
 		false, func(ctx context.Context, c *ah.Client, in recipeSearchInput) (any, error) {
 			recipes, err := c.SearchRecipes(ctx, ah.RecipeSearchOptions{
 				Query:       in.Query,

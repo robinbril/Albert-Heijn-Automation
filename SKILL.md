@@ -52,10 +52,13 @@ with their purchase history, so you get promotions on things they actually buy r
 irrelevant ones. `bonus_folder` gives the full folder when you need breadth. Group entries such as
 "Alle Alpro" have `id: 0` and a `bonusSegmentId`; resolve those with `bonus_group`.
 
-**2. Pick meals.** `search_recipes` with `max_cook_minutes` from their config. Note that recipe times
-are split: `activeMinutes` is hands-on time, `waitMinutes` is dough resting or marinating. Filter on
-active time. Read candidates with `get_recipe` and check every ingredient against their dislikes and
-allergies. Prefer recipes using the bonus matches from step 1.
+**2. Pick meals.** `search_recipes` with `max_cook_minutes` from their config. Recipe times are split
+for a reason: `handsOnMinutes` is work, while `ovenMinutes` and `waitMinutes` are unattended, and
+`totalMinutes` is when they eat. The filter applies to hands-on time only, so a lasagne with 20
+minutes of work and 40 in the oven still counts as a 20-minute weeknight meal. Mention the total
+when it is long, so nobody starts a two-hour dish at seven. Read candidates with `get_recipe` and
+check every ingredient against their dislikes and allergies. Prefer recipes using the bonus matches
+from step 1.
 
 **3. Merge before you shop.** Call `plan_ingredients` [`plan`] with the chosen recipe ids. It
 combines the ingredient lists, sums amounts per unit and tells you which ingredients several recipes

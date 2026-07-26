@@ -20,7 +20,7 @@ func recipeCommands() []command {
 			summary: "Search Allerhande recipes",
 			flags: func(fs *flag.FlagSet) {
 				fs.IntVar(&limit, "limit", 10, "maximum results")
-				fs.IntVar(&maxCookTime, "max-time", 0, "drop recipes over this many minutes")
+				fs.IntVar(&maxCookTime, "max-time", 0, "max hands-on minutes; oven and waiting time do not count")
 			},
 			run: func(ctx context.Context, c *ah.Client, fs *flag.FlagSet) (any, error) {
 				recipes, err := c.SearchRecipes(ctx, ah.RecipeSearchOptions{

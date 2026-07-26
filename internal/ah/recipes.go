@@ -49,13 +49,15 @@ type RecipeIngredient struct {
 }
 
 // RecipeTime breaks a recipe's duration into its parts, in minutes.
+//
+// Oven and waiting time are unattended: the dish is in the oven or the dough is
+// resting and you are not. Only HandsOn is work, which is what a cooking-time
+// limit is really about, while Total answers "when do we eat".
 type RecipeTime struct {
-	Cook  int `json:"cookMinutes"`
-	Oven  int `json:"ovenMinutes,omitempty"`
-	Wait  int `json:"waitMinutes,omitempty"`
-	Total int `json:"totalMinutes"`
-	// Active is cooking plus oven time: the time you actually spend on it.
-	Active int `json:"activeMinutes"`
+	HandsOn int `json:"handsOnMinutes"`
+	Oven    int `json:"ovenMinutes,omitempty"`
+	Wait    int `json:"waitMinutes,omitempty"`
+	Total   int `json:"totalMinutes"`
 }
 
 // RecipeSummary is a search hit.
@@ -77,8 +79,9 @@ type RecipeSearchOptions struct {
 	Limit int
 	// Start is the offset into the result set, for paging.
 	Start int
-	// MaxCookTime drops recipes whose active time exceeds this, in minutes.
-	// 0 disables the filter.
+	// MaxCookTime drops recipes needing more hands-on time than this, in
+	// minutes. Oven and waiting time are unattended and do not count towards
+	// it. 0 disables the filter.
 	MaxCookTime int
 }
 
@@ -133,7 +136,7 @@ func (c *Client) SearchRecipes(ctx context.Context, opts RecipeSearchOptions) ([
 	out := make([]RecipeSummary, 0, limit)
 	for _, r := range resp.RecipeSearchV2.Result {
 		timing := newRecipeTime(r.Time.Cook, r.Time.Oven, r.Time.Wait)
-		if opts.MaxCookTime > 0 && timing.Active > opts.MaxCookTime {
+		if opts.MaxCookTime > 0 && timing.HandsOn > opts.MaxCookTime {
 			continue
 		}
 		out = append(out, RecipeSummary{
@@ -274,11 +277,10 @@ func pickImage(images []recipeImage) string {
 
 func newRecipeTime(cook, oven, wait int) RecipeTime {
 	return RecipeTime{
-		Cook:   cook,
-		Oven:   oven,
-		Wait:   wait,
-		Active: cook + oven,
-		Total:  cook + oven + wait,
+		HandsOn: cook,
+		Oven:    oven,
+		Wait:    wait,
+		Total:   cook + oven + wait,
 	}
 }
 
