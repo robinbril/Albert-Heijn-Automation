@@ -1,0 +1,67 @@
+name: Release
+
+# Publishes prebuilt binaries so people who do not want to install Go can still
+# use this. Tag a commit with v* and push the tag.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, ext: .exe }
+          - { goos: windows, goarch: arm64, ext: .exe }
+          - { goos: darwin,  goarch: amd64, ext: '' }
+          - { goos: darwin,  goarch: arm64, ext: '' }
+          - { goos: linux,   goarch: amd64, ext: '' }
+          - { goos: linux,   goarch: arm64, ext: '' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          out="dist/appie_${GOOS}_${GOARCH}"
+          mkdir -p "$out"
+          # -trimpath keeps local build paths out of the published binaries.
+          go build -trimpath -ldflags="-s -w" -o "$out/appie-cli${{ matrix.ext }}" ./cmd/appie-cli
+          go build -trimpath -ldflags="-s -w" -o "$out/appie-mcp${{ matrix.ext }}" ./cmd/appie-mcp
+          cp README.md LICENSE "$out/"
+          cd dist && tar -czf "appie_${GOOS}_${GOARCH}.tar.gz" "appie_${GOOS}_${GOARCH}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appie_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          generate_release_notes: true
