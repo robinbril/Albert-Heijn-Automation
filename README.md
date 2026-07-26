@@ -1,171 +1,110 @@
-# 🛒 OpenClaw Skill: Albert Heijn
+# Albert Heijn agent
 
-> ⚠️ **Disclaimer:** This is an **unofficial, community-built** integration. It is not affiliated with, endorsed by, or connected to Albert Heijn or Ahold Delhaize in any way. It uses the same mobile API that the Appie app uses — this is undocumented and may change or break without notice. The login flow is hacky (you need to extract an auth code from browser DevTools). You may run into rate limits or blocked requests. **Use at your own risk.**
+> **Unofficial.** Not affiliated with, endorsed by, or connected to Albert Heijn or Ahold Delhaize.
+> It speaks the same mobile API the Appie app uses, which is undocumented and can change without
+> notice. Use at your own risk.
 
-An [OpenClaw](https://github.com/openclaw/openclaw) skill that turns your AI assistant into a personal grocery planner for [Albert Heijn](https://ah.nl) — the largest supermarket chain in the Netherlands. Built on top of the excellent [appie-go](https://github.com/gwillem/appie-go) library by [@gwillem](https://github.com/gwillem).
+Turns an AI assistant into a grocery agent for [Albert Heijn](https://ah.nl): it reads what you
+actually buy, matches this week's bonus folder against your habits, finds recipes, and manages your
+shopping list and cart.
 
-> **Your agent analyzes what you buy, checks this week's deals, suggests meals, and fills your shopping list — all through chat.**
+Ships as two binaries on one shared core:
 
-## What It Does
+| Binary | What it is |
+|---|---|
+| `appie-cli` | Command line client. Every command prints JSON. |
+| `appie-mcp` | MCP server, so Claude Code or any MCP client can use the same 35 tools. |
 
-1. 🔐 **Login** — Authenticates with your AH account via OAuth
-2. 📊 **Analyze** — Pulls your purchase history (previously bought products)
-3. 🧠 **Learn** — Builds a taste profile from your history + feedback
-4. 🏷️ **Bonus** — Checks weekly deals and matches them to your preferences
-5. 🍽️ **Suggest** — Proposes meals using Allerhande recipes, optimized for bonus items
-6. 🛒 **Shop** — Adds everything to your AH shopping list (basics + meal ingredients)
-7. 📈 **Improve** — Learns from approvals/rejections to get better over time
+Built on [appie-go](https://github.com/gwillem/appie-go) by [@gwillem](https://github.com/gwillem).
 
-## Quick Start
+## Install
 
-### 1. Install the CLI tool
-
-Requires [Go 1.21+](https://go.dev/dl/):
-
-```bash
-cd appie-cli
-go build -o appie-cli .
-mv appie-cli ~/go/bin/  # or anywhere in your PATH
-```
-
-### 2. Login to Albert Heijn
+Requires [Go 1.24+](https://go.dev/dl/).
 
 ```bash
-appie-cli login-url
-# Outputs a URL like: https://login.ah.nl/login?client_id=appie-ios&...
+go build -o bin/ ./cmd/...
 ```
 
-1. Open **Developer Tools** in your browser first (F12), go to the **Network** tab, and enable **Preserve log**
-2. Open the URL and log in with your Albert Heijn account
-3. After login, the browser will try to redirect to `appie://login-exit?code=XXXXX` — this will fail (it's a mobile app link, that's expected)
-4. In the Network tab, find **`ingelogd.json`**
-5. Click it and look at the **Response** — you'll see:
-   ```json
-   "pageProps": {
-     "__N_REDIRECT": "appie://login-exit?code=XXXXX",
-     "__N_REDIRECT_STATUS": 302
-   }
-   ```
-6. Copy the code (everything after `code=`)
+Then log in once. This opens your browser, and the tokens are stored in your user config directory
+(`%AppData%\appie\tokens.json` on Windows, `~/.config/appie/tokens.json` elsewhere) with mode 0600.
 
 ```bash
-appie-cli exchange-code <your-code>
+./bin/appie-cli login
 ```
 
-Tokens are saved to `.appie.json` and auto-refresh.
-
-### 3. Configure the skill
+Tokens refresh themselves after that. Check the state at any time:
 
 ```bash
-cp config-template.json config.json
+./bin/appie-cli status
 ```
 
-Edit `config.json` with your preferences:
+## Connect the MCP server
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `meals_per_week` | 3 | Number of meal suggestions per week |
-| `max_cooking_time_minutes` | 30 | Max cooking time for recipes |
-| `household_size` | 2 | Number of people |
-| `shopping_day` | `"friday"` | When you do groceries |
-| `proposal_day` | `"thursday"` | When to receive meal proposals |
-| `dislikes` | `[]` | Ingredients to avoid (e.g. `["fish", "mushrooms"]`) |
-| `allergies` | `[]` | Allergies (e.g. `["gluten", "lactose"]`) |
-| `butcher_items` | `[]` | Items to buy at the butcher instead of AH (optional) |
-| `preferences.healthy` | `true` | Prefer healthy recipes |
-| `preferences.prefer_bonus` | `true` | Prefer ingredients that are on sale |
-
-### 4. Point your OpenClaw agent at this skill
-
-Add to your OpenClaw workspace and the agent will handle the rest through conversation.
-
-## How It Works
-
-### API Discovery
-
-The skill uses the **Albert Heijn mobile API** (`api.ah.nl`) — the same API that powers the Appie app:
-
-| Feature | Endpoint | Auth |
-|---------|----------|------|
-| Product search | REST `/mobile-services/product/search/v2` | Anonymous |
-| Previously bought | GraphQL `productSearch(previouslyBought: true)` | Required |
-| Bonus products | REST `?bonus=true` via AHWEBSHOP | Anonymous |
-| Shopping lists | REST `/mobile-services/lists/v3/lists` | Required |
-| Add to list | REST `PATCH /mobile-services/shoppinglist/v2/items` | Required |
-| Recipes | GraphQL `recipeSearch` + `recipe(id)` | Anonymous |
-| Member profile | GraphQL `member` | Required |
-
-### API Notes
-
-- **`previouslyBought: true`** in `ProductSearchInput` returns all products you've ever purchased — this is undocumented
-- **`customerProfileAudiences`** on the member query reveals AH's internal segmentation (frequent buyer categories, food profile, dietary preferences)
-- **Allerhande recipes** are fully queryable via GraphQL with ingredients, cooking times, and portions
-- **Bonus products** need the `x-application: AHWEBSHOP` header to return results via REST
-
-### Weekly Flow
-
-```
-Thursday morning (cron job):
-  ├── Fetch favorite lists (weekly basics)
-  ├── Fetch current bonus products
-  ├── Match bonus with purchase history
-  ├── Search Allerhande recipes matching:
-  │   ├── Taste profile preferences
-  │   ├── Available bonus ingredients
-  │   ├── Cooking time constraints
-  │   └── Dislike/allergy filters
-  ├── Propose N meals via chat
-  ├── Wait for approval/modifications
-  └── Add all items to AH shopping list (via batch-add)
-      ├── Look up product IDs from product-cache.json first
-      ├── Weekly basics (from favorite lists)
-      ├── Meal ingredients (with product IDs)
-      ├── Butcher items (as free text notes)
-      └── Cache any newly discovered product IDs
+```bash
+claude mcp add ah -- /absolute/path/to/bin/appie-mcp
 ```
 
-## CLI Reference
+To let the assistant look but never touch, add `--env AH_READONLY=1`.
 
+## What it can do
+
+**Your history** — `purchases` merges online orders and in-store receipts into one timeline.
+`purchase` reads a single one line by line with prices. `ordered-items` ranks what you buy most.
+`spend` totals it per month. `patterns` derives your shopping cadence, favourite shopping day,
+category mix and which products are staples rather than one-offs.
+
+**Deals** — `bonus` is the whole bonus folder, `bonus-matches` narrows it to promotions on things
+you already buy, and `bargains` finds the marked-down, about-to-expire items in a specific store.
+
+**Recipes** — `recipes` searches Allerhande with a cap on active cooking time, `recipe` reads one in
+full, and `plan` merges several into a single deduplicated ingredient list so shared onions are
+bought once.
+
+**Shopping list and cart** — read with prices and totals, add products or free-text notes, change
+quantities, cross items off, delete lines, and copy the list into the cart.
+
+Run `appie-cli` with no arguments for the full command list.
+
+## Safety
+
+Writes are gated in two independent places.
+
+1. **The MCP confirm flag.** Every mutating tool refuses to run unless the caller passes
+   `confirm=true`. The check is applied when the tool is registered, not inside each handler, so a
+   tool added later cannot forget it.
+2. **`AH_READONLY=1`.** This blocks mutating requests in the HTTP transport, below every call site.
+   GraphQL bodies are inspected for a `mutation` operation, and anything unparseable is treated as a
+   write, so the guard fails closed.
+
+Writes are also never retried. A duplicated add-to-list is worse than one failure you can see.
+
+Your name, email, phone, address and loyalty card numbers are withheld from `member` output unless
+you pass `-pii` (`include_personal_details` in MCP), because that data otherwise lands in an
+assistant's context for no benefit. The segmentation AH derived about you is always shown.
+
+## Notes on the API
+
+- `previouslyBought` on `productSearch` is undocumented and returns everything you have ever bought.
+- `customerProfileProperties` exposes AH's own profiling: life stage, food profile, price segment,
+  favourite shopping day.
+- The shopping list in the app is `shoppinglist/v2`, which is a different collection from the
+  favourite lists in `lists/v3`. Items added to one do not appear in the other.
+- Deleting a list item means sending `quantity: 0`. Setting `strikeThrough` only crosses it off.
+- Paying and picking a delivery slot have no public API. Finish an order in the AH app.
+- GraphQL introspection is disabled, and Allerhande's schema drifts. When a recipe query starts
+  returning `GRAPHQL_VALIDATION_FAILED`, `appie-cli graphql` runs raw queries so you can find the
+  new shape from the validation errors.
+
+## Development
+
+```bash
+go test ./...
+go vet ./...
 ```
-appie-cli <command> [args]
 
-Auth:
-  login-url                    Get the AH login URL
-  exchange-code <code>         Exchange auth code for tokens
-
-Products:
-  search <query> [limit]       Search products
-  product <id>                 Get product details
-  bonus-products [limit]       Get current bonus products
-  previously-bought [size] [page]  Get previously bought products
-
-Shopping List:
-  shopping-list                Show main shopping list
-  shopping-lists               List all shopping lists
-  list-items <list-id>         Get items in a specific list
-  add-to-list <id> [qty]       Add product to shopping list
-  add-to-list --text "item"    Add free text item
-  batch-add                    Add multiple items from stdin (JSON array)
-  clear-list                   Clear shopping list
-
-Account:
-  member                       Show member profile
-  receipts                     List receipts (⚠️ currently broken, see Known Issues)
-  receipt <id>                 Get receipt details (⚠️ currently broken)
-```
-
-## Credits
-
-- **[appie-go](https://github.com/gwillem/appie-go)** by [@gwillem](https://github.com/gwillem) — the Go library that makes this possible
+`internal/ah` holds the client, transport guard and the endpoints appie-go does not cover;
+`cmd/appie-cli` and `cmd/appie-mcp` are thin layers over it.
 
 ## License
 
-AGPL-3.0 
-
-## Known Issues
-
-- **Receipts endpoint broken** — the AH receipt API returns 503. Tracked at [gwillem/appie-go#1](https://github.com/gwillem/appie-go/issues/1). Use `previously-bought` as an alternative.
-
-## Disclaimer
-
-This is an unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. Use at your own risk. The API may change without notice.
+AGPL-3.0

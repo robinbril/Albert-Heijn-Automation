@@ -1,316 +1,108 @@
-# Albert Heijn Grocery Skill
+# Albert Heijn grocery skill
 
-Weekly meal planning, recipe discovery, and grocery list management for Albert Heijn (Netherlands).
+Meal planning, deal hunting and shopping list management for Albert Heijn (Netherlands).
 
-## First-Time Setup
+You have either the `appie-cli` binary or the `albert-heijn` MCP server. They expose the same
+capabilities; the tool names below are the MCP ones, with the CLI equivalent in brackets.
 
-You need Go installed and the user must log in to their AH account. Follow these steps exactly.
+## Ground rules
 
-### Step 1: Install Go (if not present)
+1. **Never change a list or cart without agreement.** Show what you intend to add or remove, with
+   prices, and wait. Every write tool refuses unless you pass `confirm=true`, which exists so you
+   cannot do it by reflex.
+2. **Respect allergies and dislikes without exception.** Check every ingredient of every proposed
+   recipe, not just the headline ones.
+3. **Ask rather than assume.** Every household shops differently.
+4. **Do not dump raw personal data.** `member_profile` withholds identifying fields by default.
+   Leave it that way unless the user asks for them.
 
-Check if Go is installed:
-```bash
-go version
-```
+## First run
 
-If not installed:
-```bash
-curl -L https://go.dev/dl/go1.23.6.linux-amd64.tar.gz -o /tmp/go.tar.gz
-mkdir -p ~/.local
-tar -C ~/.local -xzf /tmp/go.tar.gz
-export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
-```
+Check `auth_status` [`appie-cli status`]. If it reports `authenticated: false`, the user must run
+`appie-cli login` in a terminal themselves; it opens their browser. You cannot do this for them.
 
-Add to your shell profile so it persists:
-```bash
-echo 'export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH' >> ~/.bashrc
-```
+Then learn who you are cooking for, in this order.
 
-### Step 2: Build appie-cli
+**1. Show them what AH knows.** Call `member_profile` [`member`]. The `properties` field holds AH's
+own profiling: life stage, food profile, diet type, price segment, favourite shopping day. Share the
+interesting parts. It is a good opener and it tells you a lot immediately.
 
-From this skill's directory:
-```bash
-cd appie-cli
-go build -o appie-cli .
-mv appie-cli ~/go/bin/
-```
+**2. Read their actual behaviour.** Call `eating_patterns` [`patterns`]. This reads their receipts
+and returns shopping cadence, favourite shopping day, category mix, and which products are staples
+versus one-offs. This is evidence, unlike what people say they eat. Follow with `ordered_items` for
+the ranked list of what they buy most.
 
-Verify it works:
-```bash
-appie-cli search "kaas" 3
-```
+**3. Then ask what the data cannot tell you:**
 
-This should return product results (no login required for search).
+- How many meals per week should you plan, and for how many people?
+- Maximum active cooking time on a weeknight?
+- Anything they hate or cannot eat?
+- Do they buy some things elsewhere? Many people get meat at a butcher. Capture those, and put them
+  on the list as free-text notes ("Slager: kipfilet") so nothing is bought twice.
+- Anything else: organic only, low packaging, a strict budget.
 
-### Step 3: User Login (requires human interaction!)
+Record the answers in `config.json` and `taste-profile.md` (templates are in this directory).
 
-The user must log in via their browser. You cannot do this for them.
+## Weekly flow
 
-**Easiest method: local login page**
+Run this the day before they shop.
 
-```bash
-appie-cli login
-```
+**1. Find the deals that matter.** `bonus_matches` [`bonus-matches`] crosses this week's bonus folder
+with their purchase history, so you get promotions on things they actually buy rather than 300
+irrelevant ones. `bonus_folder` gives the full folder when you need breadth. Group entries such as
+"Alle Alpro" have `id: 0` and a `bonusSegmentId`; resolve those with `bonus_group`.
 
-This starts a local web page. Send the URL (http://127.0.0.1:PORT) to the user. The page guides them through login with 3 simple steps:
-1. Click the login button to open AH login
-2. Log in with their AH account
-3. After the redirect fails (that's normal), paste the URL from their address bar into the form
+**2. Pick meals.** `search_recipes` with `max_cook_minutes` from their config. Note that recipe times
+are split: `activeMinutes` is hands-on time, `waitMinutes` is dough resting or marinating. Filter on
+active time. Read candidates with `get_recipe` and check every ingredient against their dislikes and
+allergies. Prefer recipes using the bonus matches from step 1.
 
-The CLI automatically exchanges the code and saves tokens. Done.
+**3. Merge before you shop.** Call `plan_ingredients` [`plan`] with the chosen recipe ids. It
+combines the ingredient lists, sums amounts per unit and tells you which ingredients several recipes
+share, so you add one bag of onions instead of three. Where `mixedUnits` is true, the recipes
+measured differently ("2 uien" and "200 g ui") and you decide the quantity.
 
-**Manual method (fallback):**
+**4. Propose.** Per meal: name, link, active cooking time, which ingredients are on bonus, which go
+on the butcher list, and what they need beyond their usual staples. Then stop and wait.
 
-If the local server doesn't work (e.g. remote environments), use the manual flow:
+**5. Fill the list.** Once they agree, `list_add` with `confirm: true` in a single call containing
+their weekly staples and the merged ingredients. Products need a `product_id` from
+`search_products`; anything bought elsewhere goes in as `text`.
 
-```bash
-appie-cli login-url
-```
+**6. Check the bill.** `shopping_list` [`list`] returns per-line prices, the total, and what the
+promotions saved.
 
-Send the URL to the user. After login, the browser tries to redirect to `appie://login-exit?code=XXXXX` which fails. The user copies the full URL (or just the code) and sends it back. Then:
+## Managing the list
 
-```bash
-# Both work: full URL or just the code
-appie-cli exchange-code "appie://login-exit?code=XXXXX"
-appie-cli exchange-code XXXXX
-```
+- `list_set_quantity` changes an amount.
+- `list_remove` deletes lines for real. `list_check_off` only crosses them off, the way ticking an
+  item in the app does. They are different operations; pick the one they meant.
+- `list_clear` wipes everything. Show them what is on it first.
+- `list_to_cart` copies the list into the online cart. Free-text notes are skipped, since they have
+  no product behind them. Paying and choosing a delivery slot have no public API, so the user
+  finishes in the AH app. `deliveries` shows scheduled orders and their slots.
 
-Verify login:
-```bash
-appie-cli member
-```
+## Other things worth knowing
 
-Tokens are saved to `.appie.json` and auto-refresh. The user only needs to do this once.
-
-### Step 4: Configure preferences
-
-```bash
-cp config-template.json config.json
-```
-
-**Don't just fill this in yourself — have a conversation with the user.** Ask them:
-
-1. **Basics:** "How many meals per week should I plan? And how many people am I cooking for?"
-2. **Cooking:** "What's the max cooking time you want? 30 minutes? An hour?"
-3. **Dislikes & allergies:** "Any ingredients you hate or can't eat?"
-4. **Shopping habits:** "What day do you usually do groceries?"
-5. **Special arrangements:** "Do you buy certain things elsewhere? For example, some people get their meat at a butcher instead of AH."
-   - If yes: ask which items → add to `butcher_items` in config
-   - These will appear on the shopping list as free text notes (e.g. "🥩 Slager: kipfilet") so the user knows to get them elsewhere
-   - If no: leave `butcher_items` as an empty list `[]`
-6. **Anything else:** "Is there anything else I should know about how you want your groceries handled?"
-   - Some users want only organic products
-   - Some want to minimize packaging
-   - Some have a strict budget
-   - Whatever they say, capture it in config and taste-profile
-
-The point is: **every household is different.** Don't assume — ask.
-
-### Step 4b: Set up weekly basics
-
-```bash
-cp weekly-basics-template.json weekly-basics.json
-```
-
-Ask the user what they buy every week (melk, brood, eieren, fruit, etc.) and what they buy om de week (schoonmaakmiddel, tandpasta, etc.). Search for each product to find the AH product ID:
-
-```bash
-appie-cli search "halfvolle melk" 3
-```
-
-Fill `weekly-basics.json` with the product IDs, names and quantities. This file is the single source of truth for recurring items. No AH shopping lists needed.
-
-### Step 5: Show the user what AH knows about them
-
-This is a great starting point — it's fun and a little confronting. Right after login, run:
-
-```bash
-appie-cli member
-```
-
-This returns AH's internal profile of the user via `customerProfileProperties`: age range, life stage, food profile, diet type, price segment, share of wallet, favorite shopping day, and more.
-
-**Share the highlights with the user!** Something like: "Wist je dat Albert Heijn dit allemaal over je weet?" followed by the interesting bits (food profile, diet, shopping day, etc). It's a great conversation starter and it helps you understand the user immediately.
-
-⚠️ Note: the member response contains personal data (name, email). Don't log or share the raw output — only share the profile insights with the user themselves.
-
-### Step 6: Build taste profile
-
-Then pull their full purchase history:
-```bash
-appie-cli previously-bought 100 0
-appie-cli previously-bought 100 1
-appie-cli previously-bought 100 2
-```
-
-Combine the member profile + purchase history to create `taste-profile.md` (from `taste-profile-template.md`) — a summary of what the user likes, buys often, their cooking style, and their preferred cuisines.
-
-## PATH
-
-Always ensure Go and appie-cli are in PATH before running commands:
-```bash
-export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
-```
-
-## Weekly Workflow
-
-Run this weekly (ideally the day before the user's shopping day).
-
-### 1. Gather Data
-```bash
-# Get current bonus products
-appie-cli bonus-products 200
-
-# Get user's purchase history (for matching)
-appie-cli previously-bought 100 0
-```
-
-Also read `weekly-basics.json` to know what recurring items to add later.
-
-### 2. Find Bonus Matches
-Cross-reference bonus products with previously bought items (`isPreviouslyBought: true`). These are deals the user actually cares about.
-
-### 3. Search Recipes
-```bash
-# Search recipes by keyword
-appie-cli search-recipes "pasta" 20
-
-# Or browse without query (returns popular recipes)
-appie-cli search-recipes "" 20
-
-# Get full recipe details with ingredients
-appie-cli recipe <recipe-id>
-```
-
-Filter recipes by:
-- Cooking time ≤ `max_cooking_time_minutes` from config
-- No ingredients in `dislikes` or `allergies`
-- Prefer recipes using current bonus ingredients
-- Check `taste-profile.md` for cuisine preferences
-
-### 4. Present Proposal to User
-Send meal suggestions via chat. For each meal include:
-- Recipe name + link + cooking time
-- Which ingredients are on bonus 🏷️
-- Which items to get at the butcher 🥩
-- Any items they need to buy beyond their usual basics
-
-**ALWAYS wait for the user to approve before touching the shopping list.**
-
-### 5. Handle Feedback
-- User approves → add to shopping list (step 6)
-- User modifies → adjust and ask again
-- User rejects → suggest alternatives
-- Log everything in `meal-history.json`
-
-### 6. Fill Shopping List
-
-#### Product cache
-Before searching for a product, check `product-cache.json` first. It maps product names to AH product IDs so you can skip repeated searches. After finding a new product ID via search, add it to the cache under the appropriate section (`basics` or `ingredients`).
-
-Before adding items, do these checks:
-
-#### Butcher check
-Go through ALL ingredients for ALL approved meals. For each ingredient, check if it matches any item in `butcher_items` from `config.json`. If it matches, do NOT add the AH product — instead add a free text note:
-```bash
-appie-cli add-to-list --text "🥩 Slager: rundergehakt (voor bolognese)" 1
-```
-Common matches to watch for: kipfilet, kip, gehakt, rundergehakt, half-om-half gehakt, biefstuk, worst, etc. Check ALL meat/protein ingredients, not just obvious ones.
-
-#### Deduplication & smart quantities
-Multiple recipes may need the same ingredient (e.g. two recipes both need onions, or garlic). Before adding to the list:
-
-1. **Collect all ingredients** across all approved meals into one combined list
-2. **Group by ingredient type** (e.g. "gele uien" appearing in 2 recipes)
-3. **Check if one package is enough:**
-   - Most vegetables (1 onion, 1 head of garlic) are enough for 2 recipes
-   - Canned goods: if 2 recipes each need tomatenblokjes, you need 2 blikken
-   - Spices/herbs: 1 package always covers multiple recipes
-4. **Check for larger/cheaper packages:**
-   - Search for the same product with different sizes: `appie-cli search "tomatenblokjes" 5`
-   - Compare unit prices (€/kg or €/L) — sometimes a bigger can is cheaper
-   - If the user needs 2+ of something, check if a multi-pack or larger size exists
-5. **Add with correct quantity** — don't add 2 separate items when 1 will do, and don't add just 1 when you need 2
-
-Example:
-- Recipe A needs uien, Recipe B needs uien → 1 netje gele uien is enough (add 1x)
-- Recipe A needs tomatenblokjes, Recipe B needs tomatenblokjes → need 2 blikjes (add 2x, or find a bigger can)
-- Recipe A needs knoflook, Recipe B needs knoflook → 1 knoflook is enough (add 1x)
-
-#### Then add to list
-Combine weekly basics (from `weekly-basics.json`) and meal ingredients into one `batch-add` call:
-
-```bash
-echo '[{"id": 54074, "qty": 1}, {"id": 197393, "qty": 1}, {"text": "Slager: kipfilet", "qty": 1}]' | appie-cli batch-add
-```
-
-Each item is either `{"id": <product-id>, "qty": N}` for AH products or `{"text": "description", "qty": N}` for free text (butcher items, notes). Include the basics from `weekly-basics.json` in the same batch. One call, everything at once.
-
-#### Save the recipes
-After filling the list, save the approved meals to `meal-history.json` with date, recipe name, ingredients, cooking time, and any notes. Also save rejected meals with the reason — this helps improve future suggestions.
-
-## API Reference
-
-### REST Endpoints (via appie-cli)
-| Command | What it does | Auth needed? |
-|---------|-------------|--------------|
-| `search <query> [limit]` | Search products | No |
-| `product <id>` | Product details | No |
-| `bonus-products [limit]` | Current bonus deals | No |
-| `previously-bought [size] [page]` | Purchase history | Yes |
-| `shopping-list` | View shopping list | Yes |
-| `shopping-lists` | List all lists | Yes |
-| `list-items <list-id>` | Items in specific list | Yes |
-| `add-to-list <id> [qty]` | Add product to list | Yes |
-| `add-to-list --text "item"` | Add free text to list | Yes |
-| `batch-add` | Add multiple items from stdin (JSON) | Yes |
-| `clear-list` | Clear shopping list | Yes |
-| `search-recipes [query] [limit]` | Search Allerhande recipes | No |
-| `recipe <id>` | Recipe with full ingredients | No |
-| `member` | Member profile | Yes |
-| `receipts` | Purchase receipts (broken, 503) | Yes |
-| `receipt <id>` | Receipt details (broken, 503) | Yes |
-
-### GraphQL Discoveries
-
-**Previously bought** (undocumented — returns full purchase history):
-```graphql
-{ productSearch(input: { query: "" previouslyBought: true size: 100 page: 0 }) {
-    products { id title brand category }
-    page { totalElements totalPages }
-} }
-```
-
-**Member segmentation** (reveals AH's internal profiling):
-```graphql
-{ member {
-    customerProfileAudiences
-    customerProfileProperties { key value }
-} }
-```
-
-**Bonus segments:**
-```graphql
-{ bonusSegments { id title } }
-```
+- `store_bargains` [`bargains`] finds marked-down items that expire soon in a specific shop. Pass a
+  `postal_code` and it checks the nearest stores. Good for "what can I cook tonight, cheaply".
+- `purchases`, `purchase_detail` and `spend` answer questions about what they ordered and what it
+  cost. Receipts include the discounts and the payment method.
+- `search_products` with `bonus_only` finds promotions in a specific category.
+- `get_product` with `nutrition: true` returns nutritional values.
 
 ## Files
-- `config.json` -- user preferences (copy from `config-template.json`)
-- `weekly-basics.json` -- recurring grocery items with product IDs (copy from `weekly-basics-template.json`)
-- `taste-profile.md` -- learned taste profile (copy from `taste-profile-template.md`)
-- `meal-history.json` -- meal approvals/rejections (copy from `meal-history-template.json`)
-- `product-cache.json` -- cached product IDs to skip repeated searches (copy from `product-cache-template.json`)
-- `.appie.json` -- AH auth tokens (auto-created on login, DO NOT commit)
 
-## Known Issues
+| File | Purpose |
+|---|---|
+| `config.json` | Preferences: meals per week, household size, cooking time, dislikes, allergies, items bought elsewhere |
+| `taste-profile.md` | What you learned about their taste |
+| `meal-history.json` | Which proposals were accepted or rejected, and why |
 
-- **Receipts endpoint is broken** — `appie-cli receipts` returns a 503 error (`appie-receipt-bff.ctp-checkout-and-receipts-prd: Name does not resolve`). This is an upstream issue in the AH API, not our bug. Tracked at [gwillem/appie-go#1](https://github.com/gwillem/appie-go/issues/1). Use `previously-bought` instead to learn about purchase history.
+Tokens live in the user config directory, never in this repository.
 
-## Important Rules
-- **NEVER** add items to the shopping list without user approval
-- **Butcher items are critical** — check EVERY meat/protein ingredient against `butcher_items` in config. If it matches, NEVER add the AH product. Always use free text: `appie-cli add-to-list --text "🥩 Slager: kipfilet"`. Missing this is confusing for the user.
-- Respect dislikes and allergies — no exceptions
-- Prefer bonus items when suggesting meals
-- Keep recipes practical: common ingredients, within cooking time limit
-- The user only needs to log in once — tokens auto-refresh after that
-- **When in doubt, ask the user.** It's better to ask than to assume.
+## When a query breaks
+
+Allerhande's GraphQL schema drifts and introspection is disabled. A `GRAPHQL_VALIDATION_FAILED`
+error means the shape changed. `appie-cli graphql` runs raw queries; the validation errors name the
+type that changed, so you can probe field by field until it matches again.
