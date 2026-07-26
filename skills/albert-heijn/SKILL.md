@@ -1,9 +1,14 @@
-# Albert Heijn grocery skill
+---
+name: albert-heijn
+description: Plan meals, hunt Albert Heijn bonus deals, and fill the shopping list or online cart for the user. Use whenever the user talks about groceries, what to eat this week, the bonus folder, Allerhande recipes, their AH shopping list or cart, what they have bought before, what they spend, or wants their purchase history read back as an eating pattern. Requires the `ah` MCP server or the `appie-cli` binary.
+---
+
+# Albert Heijn
 
 Meal planning, deal hunting and shopping list management for Albert Heijn (Netherlands).
 
-You have either the `appie-cli` binary or the `albert-heijn` MCP server. They expose the same
-capabilities; the tool names below are the MCP ones, with the CLI equivalent in brackets.
+You have either the `appie-cli` binary or the `ah` MCP server. They expose the same capabilities;
+tool names below are the MCP ones, with the CLI equivalent in brackets.
 
 ## Ground rules
 
@@ -12,9 +17,12 @@ capabilities; the tool names below are the MCP ones, with the CLI equivalent in 
    cannot do it by reflex.
 2. **Respect allergies and dislikes without exception.** Check every ingredient of every proposed
    recipe, not just the headline ones.
-3. **Ask rather than assume.** Every household shops differently.
+3. **Ask rather than assume.** Every household shops differently. Nothing in this skill is a default
+   preference; all of it comes from the user's own profile and their own purchase history.
 4. **Do not dump raw personal data.** `member_profile` withholds identifying fields by default.
    Leave it that way unless the user asks for them.
+5. **Never claim an order is placed.** Paying and choosing a delivery slot have no public API. The
+   user finishes in the AH app. Say so plainly rather than implying the groceries are on their way.
 
 ## First run
 
@@ -45,12 +53,20 @@ where they stop. This is someone's food, not a scoreboard, and none of it is med
 
 - How many meals per week should you plan, and for how many people?
 - Maximum active cooking time on a weeknight?
-- Anything they hate or cannot eat?
+- Anything they hate or cannot eat? Allergies, intolerances, a diet they follow?
 - Do they buy some things elsewhere? Many people get meat at a butcher. Capture those, and put them
   on the list as free-text notes ("Slager: kipfilet") so nothing is bought twice.
 - Anything else: organic only, low packaging, a strict budget.
 
-Record the answers in `config.json` and `taste-profile.md` (templates are in this directory).
+**4. Write it down.** Fill in `PROFILE.template.md` (next to this file) and save it as `PROFILE.md`
+in this skill's directory. From then on, read `PROFILE.md` at the start of every grocery
+conversation and plan against it. Update it whenever the user corrects you: a rejected recipe, a
+product they turned out to hate, a changed household size.
+
+The fastest way to fill it is to let the user talk. Ask them to hold the voice-memo button and say
+what they like eating, then check their claims against `eating_patterns` and `ordered_items` before
+you write anything down. What people say they eat and what their receipts say rarely match, and the
+gap itself is worth asking about.
 
 ## Weekly flow
 
@@ -61,9 +77,9 @@ with their purchase history, so you get promotions on things they actually buy r
 irrelevant ones. `bonus_folder` gives the full folder when you need breadth. Group entries such as
 "Alle Alpro" have `id: 0` and a `bonusSegmentId`; resolve those with `bonus_group`.
 
-**2. Pick meals.** `search_recipes` with `max_cook_minutes` from their config. Recipe times are split
-for a reason: `handsOnMinutes` is work, while `ovenMinutes` and `waitMinutes` are unattended, and
-`totalMinutes` is when they eat. The filter applies to hands-on time only, so a lasagne with 20
+**2. Pick meals.** `search_recipes` with `max_cook_minutes` from their profile. Recipe times are
+split for a reason: `handsOnMinutes` is work, while `ovenMinutes` and `waitMinutes` are unattended,
+and `totalMinutes` is when they eat. The filter applies to hands-on time only, so a lasagne with 20
 minutes of work and 40 in the oven still counts as a 20-minute weeknight meal. Mention the total
 when it is long, so nobody starts a two-hour dish at seven. Read candidates with `get_recipe` and
 check every ingredient against their dislikes and allergies. Prefer recipes using the bonus matches
@@ -75,7 +91,7 @@ share, so you add one bag of onions instead of three. Where `mixedUnits` is true
 measured differently ("2 uien" and "200 g ui") and you decide the quantity.
 
 **4. Propose.** Per meal: name, link, active cooking time, which ingredients are on bonus, which go
-on the butcher list, and what they need beyond their usual staples. Then stop and wait.
+on the elsewhere-list, and what they need beyond their usual staples. Then stop and wait.
 
 **5. Fill the list.** Once they agree, `list_add` with `confirm: true` in a single call containing
 their weekly staples and the merged ingredients. Products need a `product_id` from
@@ -105,13 +121,16 @@ promotions saved.
 
 ## Files
 
+Everything below lives in this skill's directory and is personal to the user. None of it belongs in
+a git repository.
+
 | File | Purpose |
 |---|---|
-| `config.json` | Preferences: meals per week, household size, cooking time, dislikes, allergies, items bought elsewhere |
-| `taste-profile.md` | What you learned about their taste |
-| `meal-history.json` | Which proposals were accepted or rejected, and why |
+| `PROFILE.md` | Household, cooking time, allergies, dislikes, staples, bought-elsewhere list |
+| `meal-history.md` | Which proposals were accepted or rejected, and why |
 
-Tokens live in the user config directory, never in this repository.
+Auth tokens live in the user config directory (`%AppData%\appie\tokens.json` on Windows,
+`~/.config/appie/tokens.json` elsewhere), never in this skill and never in a repository.
 
 ## When a query breaks
 

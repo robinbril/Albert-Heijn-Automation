@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+# Shell scripts must keep LF endings or they will not run on macOS and Linux
+# after a checkout on Windows.
+*.sh text eol=lf
+install.sh text eol=lf
+
+# PowerShell is happier with CRLF on Windows.
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.exe binary

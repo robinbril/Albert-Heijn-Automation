@@ -2,7 +2,10 @@
 .appie.json
 tokens.json
 
-# User-specific files
+# Personal profile and anything the agent learns about you. The templates are
+# tracked; the filled-in versions are not.
+skills/albert-heijn/PROFILE.md
+skills/albert-heijn/meal-history.md
 config.json
 weekly-basics.json
 taste-profile.md
@@ -11,12 +14,14 @@ product-cache.json
 
 # Build artifacts. Anchored to the repo root so they do not match cmd/appie-cli.
 /bin/
+/dist/
 /appie-cli
 /appie-mcp
 *.exe
 
-# Analysis output
+# Scratch
 analyse-snellere-flow.md
+*.local.md
 
 # OS
 .DS_Store
