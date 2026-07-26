@@ -23,7 +23,6 @@ const (
 	EnvReadOnly = "AH_READONLY"
 
 	requestTimeout = 30 * time.Second
-	legacyConfig   = ".appie.json"
 )
 
 // ErrNotAuthenticated is returned when a call needs a logged-in account.
@@ -47,20 +46,17 @@ func (c *Client) ConfigPath() string { return c.configPath }
 // ReadOnly reports whether mutating requests are blocked.
 func (c *Client) ReadOnly() bool { return c.readOnly }
 
-// ConfigPath resolves the token file location. APPIE_CONFIG wins; otherwise an
-// existing .appie.json in the working directory is honoured for backwards
-// compatibility; otherwise the per-user config directory is used. Falling back
-// to a user-scoped path matters for the MCP server, which is started by the
-// client and has no predictable working directory.
+// ConfigPath resolves the token file location: APPIE_CONFIG if set, otherwise
+// the per-user config directory.
+//
+// The working directory is deliberately not consulted. Tokens written next to
+// whatever project happened to be open are one `git add -A` away from being
+// published, and the MCP server is started by its client with no predictable
+// working directory anyway. Someone who genuinely wants a project-local token
+// file can say so with APPIE_CONFIG.
 func ConfigPath() (string, error) {
 	if p := os.Getenv(EnvConfig); p != "" {
 		return filepath.Abs(p)
-	}
-
-	if legacy, err := filepath.Abs(legacyConfig); err == nil {
-		if _, statErr := os.Stat(legacy); statErr == nil {
-			return legacy, nil
-		}
 	}
 
 	dir, err := os.UserConfigDir()
@@ -130,30 +126,5 @@ func Anonymous(ctx context.Context) (*Client, error) {
 	return c, nil
 }
 
-// Login runs the browser login flow and stores the resulting tokens. The
-// read-only guard is bypassed for this call: logging in is not a data mutation,
-// and without it a read-only deployment could never obtain a token.
-func Login(ctx context.Context) (*Client, error) {
-	path, err := ConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create config dir: %w", err)
-	}
-
-	httpClient := &http.Client{
-		Timeout:   requestTimeout,
-		Transport: newTransport(http.DefaultTransport, false),
-	}
-	api, err := appie.NewWithConfig(path, appie.WithHTTPClient(httpClient))
-	if err != nil {
-		return nil, fmt.Errorf("load tokens from %s: %w", path, err)
-	}
-
-	if err := api.Login(ctx); err != nil {
-		return nil, fmt.Errorf("login: %w", err)
-	}
-
-	return &Client{api: api, configPath: path, readOnly: readOnlyEnabled()}, nil
-}
+// Login lives in login.go: the browser flow is implemented here rather than
+// taken from appie-go, so the callback cannot be driven by another site.
