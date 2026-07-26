@@ -107,6 +107,33 @@ func historyCommands() []command {
 			},
 		},
 		{
+			name:    "health",
+			summary: "Reflect your purchase history back as a diet: group mix, Nutri-Score, repeat habits",
+			auth:    authRequired,
+			flags: func(fs *flag.FlagSet) {
+				fs.IntVar(&limit, "history", 200, "how many previously bought products to analyse")
+				fs.IntVar(&top, "receipts", 15, "how many receipts to read for purchase frequency, 0 to skip")
+			},
+			run: func(ctx context.Context, c *ah.Client, _ *flag.FlagSet) (any, error) {
+				return c.Health(ctx, limit, top)
+			},
+		},
+		{
+			name:    "swap",
+			args:    "<product-id>",
+			summary: "Find comparable products with a better Nutri-Score",
+			flags: func(fs *flag.FlagSet) {
+				fs.IntVar(&top, "limit", 5, "maximum alternatives")
+			},
+			run: func(ctx context.Context, c *ah.Client, fs *flag.FlagSet) (any, error) {
+				id, err := intArg(fs, 0, "product-id")
+				if err != nil {
+					return nil, err
+				}
+				return c.Swap(ctx, id, top)
+			},
+		},
+		{
 			name:    "member",
 			summary: "Your AH profile and the segments AH sorted you into",
 			auth:    authRequired,

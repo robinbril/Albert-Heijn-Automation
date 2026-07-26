@@ -32,6 +32,15 @@ and returns shopping cadence, favourite shopping day, category mix, and which pr
 versus one-offs. This is evidence, unlike what people say they eat. Follow with `ordered_items` for
 the ranked list of what they buy most.
 
+**2b. Reflect it back, if they want that.** `health_reflection` [`health`] turns the purchase history
+into a picture of the diet: food group mix, Nutri-Score distribution, and the D and E products they
+buy repeatedly. Use `healthier_swap` [`swap`] to offer a concrete alternative with its price
+difference rather than a lecture.
+
+Read the coverage figures before saying anything: fresh produce and meat carry no Nutri-Score, so a
+basket full of vegetables can look unscored rather than healthy. Report what the numbers show and
+where they stop. This is someone's food, not a scoreboard, and none of it is medical advice.
+
 **3. Then ask what the data cannot tell you:**
 
 - How many meals per week should you plan, and for how many people?

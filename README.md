@@ -53,6 +53,13 @@ To let the assistant look but never touch, add `--env AH_READONLY=1`.
 `spend` totals it per month. `patterns` derives your shopping cadence, favourite shopping day,
 category mix and which products are staples rather than one-offs.
 
+**Your diet** — `health` reflects the purchase history back as a basket: which food groups it is
+made of, how it distributes over Nutri-Score, and which repeatedly bought products sit at D and E.
+It is built from your previously bought products rather than from receipts, because receipts carry
+no product ids and would leave almost everything unresolved. It reports its own coverage, so a thin
+picture reads as thin. `swap` finds comparable products with a better score, with the price
+difference. Both describe a basket; neither is medical advice.
+
 **Deals** — `bonus` is the whole bonus folder, `bonus-matches` narrows it to promotions on things
 you already buy, and `bargains` finds the marked-down, about-to-expire items in a specific store.
 

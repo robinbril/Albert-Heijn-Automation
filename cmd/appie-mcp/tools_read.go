@@ -93,6 +93,16 @@ type patternsInput struct {
 	Purchases int `json:"purchases,omitempty" jsonschema:"How many purchases to analyse. Defaults to 20."`
 }
 
+type healthInput struct {
+	History  int `json:"history,omitempty" jsonschema:"How many previously bought products to analyse. Defaults to 200."`
+	Receipts int `json:"receipts,omitempty" jsonschema:"How many recent receipts to read for purchase frequency. Defaults to 15; 0 skips it."`
+}
+
+type swapInput struct {
+	ProductID int `json:"product_id" jsonschema:"Webshop product id to find alternatives for."`
+	Limit     int `json:"limit,omitempty" jsonschema:"Maximum alternatives. Defaults to 5."`
+}
+
 type memberInput struct {
 	IncludePersonalDetails bool `json:"include_personal_details,omitempty" jsonschema:"Include name, email, phone, address and loyalty card numbers. Off by default; only ask for these when the user needs them."`
 }
@@ -352,6 +362,18 @@ func registerHistoryTools(s *mcp.Server) {
 		"Derive eating and shopping patterns from receipts: shopping cadence, favourite shopping day, category mix, staples versus one-offs.",
 		true, func(ctx context.Context, c *ah.Client, in patternsInput) (any, error) {
 			return c.Patterns(ctx, in.Purchases)
+		})
+
+	addRead(s, "health_reflection",
+		"Reflect the user's purchase history back as a diet: what the basket is made of, how it scores on Nutri-Score, and which repeat purchases drive that. Reports its own coverage, because in-store receipts often carry no product ids and not every product has a score. Describes the basket; it is not medical advice.",
+		true, func(ctx context.Context, c *ah.Client, in healthInput) (any, error) {
+			return c.Health(ctx, in.History, in.Receipts)
+		})
+
+	addRead(s, "healthier_swap",
+		"Find comparable products with a better Nutri-Score than the given one, with the price difference.",
+		false, func(ctx context.Context, c *ah.Client, in swapInput) (any, error) {
+			return c.Swap(ctx, in.ProductID, in.Limit)
 		})
 
 	addRead(s, "member_profile",
