@@ -31,8 +31,9 @@ type listRemoveInput struct {
 
 type listQuantityInput struct {
 	Confirm
-	ProductID int `json:"product_id" jsonschema:"Product id already on the list."`
-	Quantity  int `json:"quantity" jsonschema:"New quantity, at least 1. To delete a line use list_remove."`
+	ProductID int    `json:"product_id,omitempty" jsonschema:"Product id already on the list."`
+	Text      string `json:"text,omitempty" jsonschema:"Target a free-text note by its text instead of a product id. Note that Albert Heijn ignores quantity changes on notes."`
+	Quantity  int    `json:"quantity" jsonschema:"New quantity, at least 1. To delete a line use list_remove."`
 }
 
 type listCheckInput struct {
@@ -103,10 +104,12 @@ func registerListWriteTools(s *mcp.Server) {
 	addWrite(s, "list_set_quantity",
 		"Change how many of a product are on the shopping list.",
 		func(ctx context.Context, c *ah.Client, in listQuantityInput) (any, error) {
-			if err := c.SetQuantity(ctx, ah.ItemRef{ProductID: in.ProductID}, in.Quantity); err != nil {
+			ref := ah.ItemRef{ProductID: in.ProductID, Text: in.Text}
+			entry, err := c.SetQuantity(ctx, ref, in.Quantity)
+			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"ok": true, "productId": in.ProductID, "quantity": in.Quantity}, nil
+			return map[string]any{"ok": true, "item": entry}, nil
 		})
 
 	addWrite(s, "list_check_off",

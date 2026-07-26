@@ -76,19 +76,37 @@ func listCommands() []command {
 			args:    "<product-id> <quantity>",
 			summary: "Change how many of an item are on the list",
 			auth:    authRequired,
+			flags: func(fs *flag.FlagSet) {
+				fs.StringVar(&text, "text", "", "target a free-text note by its text instead of a product id")
+			},
 			run: func(ctx context.Context, c *ah.Client, fs *flag.FlagSet) (any, error) {
+				// A note has no product id, so it can only be addressed by text.
+				// A note has no product id, so it can only be addressed by text.
+				if strings.TrimSpace(text) != "" {
+					qty, err := intArg(fs, 0, "quantity")
+					if err != nil {
+						return nil, err
+					}
+					entry, err := c.SetQuantity(ctx, ah.ItemRef{Text: text}, qty)
+					if err != nil {
+						return nil, err
+					}
+					return map[string]any{"ok": true, "item": entry}, nil
+				}
+
 				id, err := intArg(fs, 0, "product-id")
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w (or pass -text \"note\")", err)
 				}
 				qty, err := intArg(fs, 1, "quantity")
 				if err != nil {
 					return nil, err
 				}
-				if err := c.SetQuantity(ctx, ah.ItemRef{ProductID: id}, qty); err != nil {
+				entry, err := c.SetQuantity(ctx, ah.ItemRef{ProductID: id}, qty)
+				if err != nil {
 					return nil, err
 				}
-				return map[string]any{"ok": true, "productId": id, "quantity": qty}, nil
+				return map[string]any{"ok": true, "item": entry}, nil
 			},
 		},
 		{

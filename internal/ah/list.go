@@ -192,17 +192,37 @@ func (c *Client) AddToList(ctx context.Context, items []appie.ListItem) error {
 	return nil
 }
 
-// SetQuantity changes the amount of a line. Quantity 0 removes it; use Remove
-// for that so the intent is explicit at the call site.
-func (c *Client) SetQuantity(ctx context.Context, ref ItemRef, quantity int) error {
+// SetQuantity changes the amount of a line and returns the line as it stands
+// afterwards. Quantity 0 removes it; use Remove for that so the intent is
+// explicit at the call site.
+//
+// The result is read back because the API answers 200 to updates it does not
+// apply: quantity changes on free-text notes are accepted and ignored. Without
+// the check this reported a success that never happened.
+func (c *Client) SetQuantity(ctx context.Context, ref ItemRef, quantity int) (*ListEntry, error) {
 	if quantity < 1 {
-		return fmt.Errorf("quantity must be at least 1; use Remove to delete a line")
+		return nil, fmt.Errorf("quantity must be at least 1; use Remove to delete a line")
 	}
 	if ref.ProductID <= 0 && strings.TrimSpace(ref.Text) == "" {
-		return fmt.Errorf("item reference needs a productId or text")
+		return nil, fmt.Errorf("item reference needs a productId or text")
 	}
-	_, err := c.patchList(ctx, []patchItem{newPatchItem(ref, quantity, false)})
-	return err
+
+	updated, err := c.patchList(ctx, []patchItem{newPatchItem(ref, quantity, false)})
+	if err != nil {
+		return nil, err
+	}
+
+	want := refKey(ref)
+	for _, entry := range summarise(updated).Items {
+		if refKey(entry.Ref()) != want {
+			continue
+		}
+		if entry.Quantity != quantity {
+			return &entry, fmt.Errorf("albert heijn kept the quantity at %d instead of %d; it ignores quantity changes on free-text notes", entry.Quantity, quantity)
+		}
+		return &entry, nil
+	}
+	return nil, fmt.Errorf("line not found on the list after the update")
 }
 
 // Remove deletes lines from the shopping list. This sends quantity 0, which is
@@ -260,7 +280,10 @@ func (c *Client) CheckOff(ctx context.Context, refs []ItemRef, checked bool) err
 	return err
 }
 
-// FindInList returns the unchecked lines whose title contains term.
+// FindInList returns every line whose title contains term, crossed off or not.
+//
+// Checked lines are included on purpose: skipping them stranded them, because
+// restoring or deleting a line first requires finding it.
 func (c *Client) FindInList(ctx context.Context, term string) ([]ListEntry, error) {
 	needle := strings.ToLower(strings.TrimSpace(term))
 	if needle == "" {
@@ -274,7 +297,7 @@ func (c *Client) FindInList(ctx context.Context, term string) ([]ListEntry, erro
 
 	matches := make([]ListEntry, 0)
 	for _, item := range list.Items {
-		if !item.Checked && strings.Contains(strings.ToLower(item.Title), needle) {
+		if strings.Contains(strings.ToLower(item.Title), needle) {
 			matches = append(matches, item)
 		}
 	}
