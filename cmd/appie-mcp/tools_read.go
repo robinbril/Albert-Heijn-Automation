@@ -104,7 +104,7 @@ type swapInput struct {
 }
 
 type memberInput struct {
-	IncludePersonalDetails bool `json:"include_personal_details,omitempty" jsonschema:"Include name, email, phone, address and loyalty card numbers. Off by default; only ask for these when the user needs them."`
+	IncludePersonalDetails bool `json:"include_personal_details,omitempty" jsonschema:"Include identifying details such as name, email, phone, address and loyalty card numbers. Off by default; only ask for these when the user needs them."`
 }
 
 func registerReadTools(s *mcp.Server) {
@@ -143,9 +143,9 @@ func registerReadTools(s *mcp.Server) {
 		})
 
 	addRead(s, "deliveries",
-		"Scheduled orders with their delivery slots and status.",
-		true, func(ctx context.Context, c *ah.Client, _ emptyInput) (any, error) {
-			return c.API().GetFulfillments(ctx)
+		"Scheduled orders with their delivery slots and status. The delivery address is withheld unless explicitly requested.",
+		true, func(ctx context.Context, c *ah.Client, in memberInput) (any, error) {
+			return c.GetDeliveries(ctx, in.IncludePersonalDetails)
 		})
 
 	addRead(s, "auth_status",

@@ -9,7 +9,10 @@ import (
 )
 
 func orderCommands() []command {
-	var quantity int
+	var (
+		quantity   int
+		includePII bool
+	)
 
 	return []command{
 		{
@@ -121,8 +124,11 @@ func orderCommands() []command {
 			name:    "deliveries",
 			summary: "Scheduled orders with their delivery slots",
 			auth:    authRequired,
+			flags: func(fs *flag.FlagSet) {
+				fs.BoolVar(&includePII, "pii", false, "include the delivery address")
+			},
 			run: func(ctx context.Context, c *ah.Client, _ *flag.FlagSet) (any, error) {
-				return c.API().GetFulfillments(ctx)
+				return c.GetDeliveries(ctx, includePII)
 			},
 		},
 	}
