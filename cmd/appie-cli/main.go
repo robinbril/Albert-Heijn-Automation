@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/robinbril/openclaw-skill-albert-heijn/internal/ah"
+	"github.com/robinbril/Albert-Heijn-Automation/internal/ah"
 )
 
 // authMode declares what a command needs from the AH API.

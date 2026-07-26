@@ -5,7 +5,7 @@ import (
 	"flag"
 
 	appie "github.com/gwillem/appie-go"
-	"github.com/robinbril/openclaw-skill-albert-heijn/internal/ah"
+	"github.com/robinbril/Albert-Heijn-Automation/internal/ah"
 )
 
 func orderCommands() []command {

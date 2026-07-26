@@ -1,4 +1,4 @@
-module github.com/robinbril/openclaw-skill-albert-heijn
+module github.com/robinbril/Albert-Heijn-Automation
 
 go 1.25.0
 

@@ -16,7 +16,7 @@ import (
 	"os"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/robinbril/openclaw-skill-albert-heijn/internal/ah"
+	"github.com/robinbril/Albert-Heijn-Automation/internal/ah"
 )
 
 const version = "2.0.0"

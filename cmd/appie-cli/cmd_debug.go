@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/robinbril/openclaw-skill-albert-heijn/internal/ah"
+	"github.com/robinbril/Albert-Heijn-Automation/internal/ah"
 )
 
 func debugCommands() []command {

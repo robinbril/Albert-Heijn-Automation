@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/robinbril/openclaw-skill-albert-heijn/internal/ah"
+	"github.com/robinbril/Albert-Heijn-Automation/internal/ah"
 )
 
 func authCommands() []command {
